@@ -1,0 +1,55 @@
+name: Build APK from ZIP
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+          if [ -z "$ZIP" ]; then echo "No .zip found in repo root"; exit 1; fi
+          echo "Using $ZIP"
+          mkdir -p extracted
+          unzip -oq "$ZIP" -d extracted
+          SETTINGS=$(find extracted -type f -name "settings.gradle.kts" | head -n 1)
+          if [ -z "$SETTINGS" ]; then echo "settings.gradle.kts not found inside ZIP"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Collect APK
+        run: cp "${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk" DuoBeam.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DuoBeam-apk
+          path: DuoBeam.apk
+
+      - name: Publish rolling release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          commit: ${{ github.sha }}
+          name: DuoBeam latest
+          artifacts: DuoBeam.apk
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
